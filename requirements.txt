@@ -1,0 +1,28 @@
+ipykernel
+matplotlib
+numpy<2; sys_platform == "darwin" and platform_machine == "x86_64"
+numpy; sys_platform != "darwin" or platform_machine != "x86_64"
+PyMuPDF
+PyQt6>=6.7,<6.11
+# Intel Mac's last PyTorch wheels need the compatible embedding stack and NumPy 1.
+sentence-transformers>=3.4,<4; sys_platform == "darwin" and platform_machine == "x86_64"
+torch==2.2.2; sys_platform == "darwin" and platform_machine == "x86_64"
+transformers>=4.41,<4.50; sys_platform == "darwin" and platform_machine == "x86_64"
+sentence-transformers; sys_platform != "darwin" or platform_machine != "x86_64"
+tiktoken
+
+# Local Office/RTF text extraction on Windows and macOS.
+python-docx>=1.1,<2
+python-pptx>=1,<2
+python-calamine>=0.9,<1
+striprtf>=0.0.26,<1
+# Read-only Word pagination for passage locations on Windows with Word installed.
+pywin32>=306; sys_platform == "win32"
+
+# CPU OCR on Windows and macOS (Intel x86_64 and Apple Silicon arm64).
+# Install native wheels separately on each platform; do not copy .venv.
+indra-ocr==1.1.2
+# OpenCV 4.11 has Intel/ARM macOS 13 wheels and supports NumPy 1 on Intel Macs.
+opencv-python-headless>=4.8,<4.12
+# Keep the wheel range verified for Intel macOS, Apple Silicon and Windows.
+onnxruntime>=1.20,<1.24

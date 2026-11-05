@@ -1,0 +1,3 @@
+# Keep local benchmarks, corpus manifests, generated PDFs and measured runs private.
+local/
+runs/

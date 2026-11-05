@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+.cache/
+models/all-MiniLM-L6-v2/
+models/.bundle-*/
+models/indra-ocr/
+models/.indra-*/
+venv/
+env/
+
+# Local document library and generated indexes
+Files/
+vector_store_notebook/
+
+# Runtime databases and generated vector artifacts
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.npy
+*.jsonl
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+run_checks.log

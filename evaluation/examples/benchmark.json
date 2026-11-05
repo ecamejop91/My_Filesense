@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "synthetic-smoke-v1",
+  "queries": [
+    {
+      "query_id": "q-payment",
+      "text": "When must I pay for the office chairs?",
+      "split": "test",
+      "judgments": {"finance/invoice.pdf": 3, "travel/hotel.pdf": 0, "study/graphs.pdf": 0}
+    },
+    {
+      "query_id": "q-no-answer",
+      "text": "Recipe for chocolate cake",
+      "split": "test",
+      "judgments": {"finance/invoice.pdf": 0, "travel/hotel.pdf": 0, "study/graphs.pdf": 0}
+    }
+  ]
+}
