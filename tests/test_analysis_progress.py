@@ -23,7 +23,6 @@ import document_search_engine as engine
 import document_database as database
 import document_tag_store as tags
 import ocr
-from evaluation.performance import PerformanceController
 
 
 class Tokenizer:
@@ -82,10 +81,6 @@ class AnalysisProgressTests(unittest.TestCase):
         for name, value in [('tag_names', ['Finance']), ('load_tag_rows', []),
                             ('load_tag_definitions', {'Finance': 'invoice'})]:
             self.stack.enter_context(patch.object(gui, name, return_value=value))
-        self.stack.enter_context(patch('evaluation.performance.PerformanceController',
-            side_effect=lambda parent, **kwargs: PerformanceController(
-                parent, source_base=self.root, database=self.root / 'index.sqlite3',
-                state_dir=self.root / 'state', run_dir=self.root / 'runs')))
         window = gui.DocumentQueryWindow()
         window.vector_store_dir = self.root / 'store'
         self.windows.append(window)
@@ -125,6 +120,7 @@ class AnalysisProgressTests(unittest.TestCase):
             self.assertEqual(window._analysis_dialog.file_label.text(), 'book.pdf')
             self.assertEqual(window._analysis_dialog.stage_bar.value(), 4)
             self.assertFalse(window.analyze_btn.isEnabled())
+            self.assertFalse(window.settings_button.isEnabled())
             worker = window._analysis_worker
             self.assertEqual(worker.ocr_model, 'indra')
             window.analyze_files()
@@ -132,6 +128,7 @@ class AnalysisProgressTests(unittest.TestCase):
             gate.set()
             self.wait_until(lambda: window._analysis_worker is None)
         self.assertTrue(window.analyze_btn.isEnabled())
+        self.assertTrue(window.settings_button.isEnabled())
         self.assertEqual(window._analysis_dialog.stage_label.text(), 'Analysis complete')
         self.assertEqual(window._analysis_dialog.items[str(self.pdf)].text(2), 'Embedded 32 of 96 chunks')
         self.assertEqual(window.file_list.count(), 1)
@@ -155,6 +152,7 @@ class AnalysisProgressTests(unittest.TestCase):
             self.wait_until(lambda: window._analysis_worker is None)
         tag.assert_not_called()
         self.assertTrue(window.analyze_btn.isEnabled())
+        self.assertTrue(window.settings_button.isEnabled())
         self.assertIsNone(window.index_data)
         self.assertEqual(window._analysis_dialog.stage_label.text(), 'Analysis cancelled')
 
@@ -165,6 +163,7 @@ class AnalysisProgressTests(unittest.TestCase):
             self.wait_until(lambda: window._analysis_worker is None)
         self.assertIn('bad PDF', window._analysis_dialog.detail_label.text())
         self.assertTrue(window.analyze_btn.isEnabled())
+        self.assertTrue(window.settings_button.isEnabled())
         self.assertIsNone(window.index_data)
 
     def test_close_requests_safe_stop_and_waits_without_blocking_event_loop(self):

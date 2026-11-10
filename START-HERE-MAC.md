@@ -58,13 +58,10 @@ Never copy a virtual environment between computers.
 - Python packages: installed from `requirements.txt`
 - Portable OCR weights: `models/indra-ocr/` (keep this folder when copying the app)
 - Local Mac compatibility change: PDF and folder links use Qt's cross-platform opener.
-- Private libraries, preferences, reports, temporary files, and caches stay under
+- Private libraries, temporary files, caches, and logs stay under
   `~/Library/Application Support/FileSense/` for the current Mac account.
 - Other ordinary Mac accounts start with their own empty FileSense library.
 - This applies to installed and portable copies. Moving the app does not move private data.
-- Import an older library with **Advanced → Import Existing Library…**. Select its
-  `file_tags.sqlite3` and confirm. Your private library must be empty. The old copy
-  remains unchanged and retains its original permissions.
 - FileSense verifies owner-only data permissions and stops if it cannot protect them.
   Source documents and exports in shared locations remain accessible there.
 - See the README section **Privacy and separate computer accounts** for boundaries.

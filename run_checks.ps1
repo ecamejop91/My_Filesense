@@ -1,5 +1,5 @@
-# Installs updated requirements into .venv, measures the PDF pipeline changes,
-# and runs the test suite. Logs stay in the current account's private storage.
+# Installs updated requirements into .venv and runs the test suite.
+# Logs stay in the current account's private storage.
 # Run from PowerShell:  powershell -ExecutionPolicy Bypass -File .\run_checks.ps1
 $ErrorActionPreference = 'Continue'
 $appRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -30,8 +30,7 @@ function Run-Step([string]$title, [string[]]$arguments) {
     Remove-Item -LiteralPath $out, $err -ErrorAction SilentlyContinue
 }
 
-Run-Step 'Install requirements' @('-m', 'pip', 'install', '-r', 'requirements.txt')
-Run-Step 'Speed checks' @('tools\check_speedups.py')
+Run-Step 'Install test requirements' @('-m', 'pip', 'install', '-r', 'requirements-test.txt')
 Run-Step 'Test suite' @('-m', 'unittest', 'discover', '-s', 'tests', '-v')
 
 Write-Host "`nDone. Full output saved to $log" -ForegroundColor Green

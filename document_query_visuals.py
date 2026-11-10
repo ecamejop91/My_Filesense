@@ -6,7 +6,6 @@ from __future__ import annotations
 import html
 from pathlib import Path
 import sys
-from time import perf_counter
 
 from qt_runtime import prepare_app_identity, prepare_qt_plugins, prepare_standard_streams
 
@@ -35,7 +34,6 @@ from document_search_engine import (
     TOP_K,
     load_vector_store,
     search_index,
-    update_vector_store,
     get_embedding_model,
     merge_index_delta,
 )
@@ -46,7 +44,6 @@ from document_tag_store import (
     load_tag_rows,
     save_tag_definition,
     tag_color,
-    tag_files,
     tag_names,
 )
 
@@ -95,7 +92,6 @@ class DocumentQueryVisuals:
         self._analysis_outcome = None
         self._close_after_analysis = False
         self.index_data = None
-        self.tag_data = None
         self.tag_filters = {}
         self._last_results = None
         self._last_results_kind = None
@@ -103,12 +99,12 @@ class DocumentQueryVisuals:
         self._passage_selector = PassageSelector()
         self._word_page_locator = WordPageLocator()
         self.vector_store_dir = VECTOR_STORE_DIR
-        from evaluation.performance import PerformanceController
-        self.performance = PerformanceController(
-            self, database=Path(self.vector_store_dir) / 'file_tags.sqlite3')
-        self.performance_dialog = None
         self.setWindowTitle("FileSense")
         self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.ExpandedClientAreaHint
+                            | Qt.WindowType.NoTitleBarBackgroundHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_ContentsMarginsRespectsSafeArea, False)
+        self.setMenuWidget(self._build_title_bar())
 
         self.resize(1416, 1014)
         self.setMinimumSize(1080, 806)
@@ -117,7 +113,6 @@ class DocumentQueryVisuals:
         layout = QVBoxLayout(central)
         layout.setContentsMargins(30, 26, 30, 24)
         layout.setSpacing(20)
-        layout.addWidget(self._build_header())
         layout.addWidget(self._build_file_section())
         layout.addWidget(self._build_tag_filter())
 
@@ -134,59 +129,26 @@ class DocumentQueryVisuals:
         self.setCentralWidget(central)
         self._apply_theme()
         self.categories_view.setHtml(self._format_categories_html())
+        self.statusBar().setToolTip('Private library for your current computer account\n' + str(PATHS.root.resolve()))
         self.statusBar().showMessage("Ready. Add documents, configure tags, or search the archive.")
 
-    def _build_header(self) -> QFrame:
-        header = QFrame()
-        header.setObjectName("header")
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(24, 12, 24, 12)
-
-        logo = QLabel()
-        logo.setPixmap(QPixmap(str(ASSETS_DIR / 'filesense.png')).scaled(
-            64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        logo.setFixedSize(64, 64)
-        layout.addWidget(logo)
-
-        title_column = QVBoxLayout()
-        eyebrow = QLabel("LOCAL DOCUMENT INTELLIGENCE")
-        eyebrow.setObjectName("eyebrow")
-        title = QLabel("FileSense")
-        title.setObjectName("appTitle")
-        subtitle = QLabel("Index your documents once. Find the exact passage when it matters.")
-        subtitle.setObjectName("subtitle")
-        title_column.addWidget(eyebrow)
-        title_column.addWidget(title)
-        title_column.addWidget(subtitle)
-
-        self.library_status = QLabel("LOCAL INDEX\nREADY")
-        self.library_status.setObjectName("libraryStatus")
-        self.library_status.setToolTip(
-            'Private library for your current computer account\n' + str(PATHS.root.resolve()))
-        self.library_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.library_status.setMinimumWidth(132)
-
-        layout.addLayout(title_column)
+    def _build_title_bar(self) -> QFrame:
+        title_bar = QFrame()
+        title_bar.setObjectName('titleBar')
+        title_bar.setFixedHeight(36)
+        layout = QHBoxLayout(title_bar)
+        # Leave room for the system-drawn app title/icon and caption buttons.
+        layout.setContentsMargins(128, 3, 144, 3)
+        self.settings_button = QPushButton('Settings')
+        self.settings_button.setObjectName('settingsButton')
+        self.settings_button.setFixedHeight(28)
+        self.settings_button.setShortcut('Alt+S')
+        settings_menu = QMenu(self.settings_button)
+        settings_menu.addAction('Clear Database', self.clear_database)
+        self.settings_button.setMenu(settings_menu)
+        layout.addWidget(self.settings_button)
         layout.addStretch()
-        self.advanced_button = QPushButton('Advanced')
-        self.advanced_button.setObjectName('secondaryButton')
-        advanced_menu = QMenu(self.advanced_button)
-        advanced_menu.addAction('Performance…', self.show_performance)
-        advanced_menu.addAction('Import Existing Library…', self.import_existing_library)
-        advanced_menu.addSeparator()
-        advanced_menu.addAction('Clear Database', self.clear_database)
-        self.advanced_button.setMenu(advanced_menu)
-        layout.addWidget(self.advanced_button)
-        layout.addWidget(self.library_status)
-        return header
-
-    def show_performance(self) -> None:
-        from evaluation.performance_dialog import PerformanceDialog
-        if self.performance_dialog is None:
-            self.performance_dialog = PerformanceDialog(self.performance, self)
-        self.performance_dialog.show()
-        self.performance_dialog.raise_()
-        self.performance_dialog.activateWindow()
+        return title_bar
 
     def clear_database(self) -> None:
         answer = QMessageBox.question(
@@ -208,7 +170,6 @@ class DocumentQueryVisuals:
             self._show_warning(f"Could not clear the database: {exc}")
             return
         self.index_data = None
-        self.tag_data = None
         self._clear_query_cache()
         for check in self.tag_filters.values():
             check.blockSignals(True)
@@ -221,48 +182,7 @@ class DocumentQueryVisuals:
         self.categories_view.setHtml(self._format_categories_html())
         self.analysis_progress.setValue(0)
         self.analysis_progress.setVisible(False)
-        self.library_status.setText("EMPTY INDEX\nREADY")
         self.statusBar().showMessage("Database cleared. Load documents or analyze the queued files to start again.")
-
-    def import_existing_library(self) -> None:
-        if self._analysis_worker is not None or self.performance.busy:
-            self._show_warning('Wait for analysis and evaluation to finish before importing a library.')
-            return
-        source, _ = QFileDialog.getOpenFileName(
-            self, 'Import an existing FileSense library',
-            str(Path(__file__).resolve().parent / 'vector_store_notebook'),
-            'FileSense library (file_tags.sqlite3);;SQLite database (*.sqlite3)')
-        if not source:
-            return
-        answer = QMessageBox.question(
-            self, 'Import into your private library',
-            'Copy this library, including extracted text and tags, into your current computer account?\n\n'
-            'Only import a library you are authorized to use. Your account library must be empty. '
-            'The original library and source documents will remain unchanged.',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            from library_import import import_library
-            result = import_library(source, Path(self.vector_store_dir) / 'file_tags.sqlite3')
-        except Exception as exc:
-            self._show_warning(f'Could not import the library: {exc}')
-            return
-        self.index_data = None
-        self.tag_data = None
-        self._clear_query_cache()
-        self.query_input.clear()
-        old_group = self.tag_filter_scope.parentWidget()
-        self.tag_filters = {}
-        new_group = self._build_tag_filter()
-        self.centralWidget().layout().replaceWidget(old_group, new_group)
-        old_group.hide()
-        old_group.deleteLater()
-        self.results_view.setHtml(self._empty_results_html())
-        self.categories_view.setHtml(self._format_categories_html())
-        self.library_status.setText('LIBRARY IMPORTED\nREADY')
-        self.statusBar().showMessage(f"Imported {result['documents']} documents into your private library.")
 
     def _build_file_section(self) -> QWidget:
         section = QWidget()
@@ -487,11 +407,7 @@ class DocumentQueryVisuals:
             """
             QMainWindow { background: #f3f0e8; }
             QWidget { color: #202825; }
-            QFrame#header { background: #173f3a; border-radius: 14px; }
-            QLabel#eyebrow { color: #a9d2bd; font-size: 10px; font-weight: 700; letter-spacing: 1.8px; }
-            QLabel#appTitle { color: #f7f3e8; font-family: Georgia; font-size: 30px; font-weight: 700; }
-            QLabel#subtitle { color: #d1ddd5; font-size: 13px; }
-            QLabel#libraryStatus { background: #e1b451; color: #173f3a; border-radius: 9px; font-size: 11px; font-weight: 800; letter-spacing: 1px; padding: 10px; }
+            QFrame#titleBar { background: #f3f0e8; }
             QFrame#documentControls, QFrame#tagFilterPanel { background: #ffffff; border: 1px solid #57967b; border-radius: 12px; }
             QScrollArea#tagFilterScroll, QWidget#tagFilterContent { background: transparent; border: none; }
             QLabel#sectionHint { color: #6c746e; font-size: 12px; font-weight: 400; letter-spacing: 0; }
@@ -517,6 +433,8 @@ class DocumentQueryVisuals:
             QPushButton#secondaryButton:hover { background: #c4e0ce; }
             QPushButton#quietButton { background: transparent; border: 1px solid #d1cdc2; color: #4f5b55; }
             QPushButton#quietButton:hover { background: #f0ede5; }
+            QPushButton#settingsButton { background: transparent; color: #4f5b55; font-weight: 500; border-radius: 4px; padding: 3px 10px; }
+            QPushButton#settingsButton:hover { background: #e6e1d6; }
             QProgressBar { border: 1px solid #d1cdc2; border-radius: 6px; background: #ece8de; text-align: center; height: 16px; }
             QProgressBar::chunk { background: #57967b; border-radius: 5px; }
             QStatusBar { background: #e6e1d6; color: #53605a; font-size: 11px; }
@@ -684,7 +602,7 @@ class DocumentQueryVisuals:
             self.statusBar().showMessage(f"Displayed {len(results)} tag-filtered document(s).")
             return
         # Reuse the last submitted query, even if the input now contains an
-        # unsent edit. Filtering is not a new search or a performance record.
+        # unsent edit. Filtering is not a new search.
         self._display_query_results()
 
     def _clear_query_cache(self) -> None:
@@ -745,23 +663,44 @@ class DocumentQueryVisuals:
         elif Path(new_name).suffix.lower() != file_path.suffix.lower():
             self._show_warning('Keep the original file extension when renaming a document.')
             return
-        new_path = file_path.with_name(new_name)
-        if new_path == file_path:
-            return
-        if new_path.exists():
-            self._show_warning(f"A file named '{new_path.name}' already exists in that folder.")
+        try:
+            if '/' in new_name or '\\' in new_name:
+                raise ValueError('Enter a file name without directory separators.')
+            new_path = file_path.with_name(new_name)
+            if new_path == file_path:
+                return
+            if new_path.exists():
+                self._show_warning(f"A file named '{new_path.name}' already exists in that folder.")
+                return
+        except (ValueError, OSError) as exc:
+            self._show_warning(f"Could not rename file: {exc}")
             return
         answer = QMessageBox.question(self, "Confirm rename", f"Rename '{file_path.name}' to '{new_path.name}' on the computer and update FileSense?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes:
             return
+        renamed = False
         try:
             self._clear_query_cache()
             file_path.rename(new_path)
+            renamed = True
             from document_search_engine import rename_document_in_vector_store
             if not rename_document_in_vector_store(file_path, new_path, self.vector_store_dir):
                 raise ValueError("The document was not found in the vector index.")
-            from document_tag_store import rename_file_tags
-            rename_file_tags(file_path, new_path)
+        except Exception as exc:
+            if renamed:
+                try:
+                    new_path.rename(file_path)
+                except OSError as recovery_error:
+                    self._show_warning(
+                        f"Could not update the index: {exc}. The file remains at '{new_path}' "
+                        f"because restoring its original name failed: {recovery_error}")
+                    return
+            self._show_warning(f"Could not rename file: {exc}")
+            return
+
+        # The database has committed both document and tag paths. A display
+        # error must not undo just the physical filename after this point.
+        try:
             old_target = str(file_path.resolve())
             new_target = str(new_path.resolve()).replace("\\", "/")
             if self.index_data is not None:
@@ -781,12 +720,8 @@ class DocumentQueryVisuals:
             self.results_view.setHtml(self._empty_results_html())
             self.statusBar().showMessage(f"Renamed file to {new_path.name}.")
         except Exception as exc:
-            if new_path.exists() and not file_path.exists():
-                try:
-                    new_path.rename(file_path)
-                except OSError:
-                    pass
-            self._show_warning(f"Could not rename file: {exc}")
+            self.index_data = None
+            self._show_warning(f"File renamed to '{new_path.name}', but the display could not refresh: {exc}")
 
     def _remove_file_from_database(self, file_path: Path) -> None:
         answer = QMessageBox.question(
@@ -1025,8 +960,8 @@ class DocumentQueryVisuals:
         # Prevent edits/searches against a collection being replaced. The progress
         # window remains enabled and the UI event loop keeps painting/responding.
         self.centralWidget().setEnabled(False)
+        self.settings_button.setEnabled(False)
         self.analysis_progress.setRange(0, 0)
-        self.library_status.setText("ANALYSIS\nRUNNING")
         self.statusBar().showMessage("Analysis running. Follow the floating progress window.")
         self._analysis_dialog.show()
         worker.start()
@@ -1045,7 +980,6 @@ class DocumentQueryVisuals:
             # index already in memory instead of reloading the whole library.
             self.index_data = merge_index_delta(self.index_data, store)
         # Otherwise the index loads lazily at the next search.
-        self.tag_data = tags
         self._analysis_outcome = ('Analysis complete',
             f"Indexed {len(store['added_doc_records'])} file(s); skipped {len(store['skipped_paths'])}. "
             "The collection is ready to search.")
@@ -1082,10 +1016,10 @@ class DocumentQueryVisuals:
             # Index saving may finish before cancellation/tagging failure. Discard
             # stale in-memory data so the next search reloads the committed index.
             self.index_data = None
-            self.tag_data = None
             self._clear_query_cache()
             self.results_view.setPlainText(message)
         self.centralWidget().setEnabled(True)
+        self.settings_button.setEnabled(True)
         self.analysis_progress.setRange(0, 1)
         self.analysis_progress.setValue(1 if outcome == 'Analysis complete' else 0)
         self.analysis_progress.setVisible(False)
@@ -1093,7 +1027,6 @@ class DocumentQueryVisuals:
             self.categories_view.setHtml(self._format_categories_html())
         except Exception:
             self.categories_view.setPlainText('Categories could not be refreshed. Retry analysis.')
-        self.library_status.setText('INDEX UPDATED\nREADY' if outcome == 'Analysis complete' else 'ANALYSIS\nSTOPPED')
         self.statusBar().showMessage(f'{outcome}. {message}')
         self._analysis_dialog.finish(outcome, message)
         if self._close_after_analysis:
@@ -1105,23 +1038,14 @@ class DocumentQueryVisuals:
             self._show_warning("Enter a query before searching.")
             return
 
-        start = perf_counter()
         try:
-            displayed = self._search_documents(query)
+            self._search_documents(query)
         except Exception as exc:
-            self.library_status.setText("INDEX\nUNAVAILABLE")
+            self.statusBar().showMessage('Search failed. The index is unavailable.')
             self._show_warning(f"Search failed: {exc}")
             return
-        elapsed_ms = (perf_counter() - start) * 1000
-        if displayed is not None and self.performance.history.enabled:
-            kind, results = displayed
-            try:
-                self.performance.record_search(query, kind, results, elapsed_ms)
-            except (TypeError, ValueError, KeyError):
-                # A diagnostic must not turn a successful search into a failure.
-                self.statusBar().showMessage('Search complete. This search could not be added to performance history.')
 
-    def _search_documents(self, query: str):
+    def _search_documents(self, query: str) -> None:
         exact_query_tag = next((tag for tag in tag_names() if tag.casefold() == query.casefold()), None)
         if exact_query_tag is not None:
             tag_results = exact_tag_matches(exact_query_tag)
@@ -1130,17 +1054,16 @@ class DocumentQueryVisuals:
                 self.results_view.setPlainText("No files were found for that tag.")
                 self.statusBar().showMessage("No tag matches found.")
                 self._last_results, self._last_results_kind = [], 'tag'
-                return 'tag', []
+                return
 
             self._last_results = tag_results
             self._last_results_kind = "tag"
-            filtered = self._display_query_results()
-            return 'tag', filtered
+            self._display_query_results()
+            return
 
         if self.index_data is None:
-            self.library_status.setText("LOADING\nINDEX")
+            self.statusBar().showMessage('Loading the search index…')
             self.index_data = load_vector_store(vector_store_dir=self.vector_store_dir)
-            self.library_status.setText("LOCAL INDEX\nREADY")
 
         if not self.index_data["doc_records"]:
             self._show_warning("No indexed files were found. Run Analyze & Index first.")
@@ -1166,12 +1089,11 @@ class DocumentQueryVisuals:
             self.results_view.setPlainText("No indexed text chunks are available to search.")
             self.statusBar().showMessage("No searchable text chunks found.")
             self._last_results, self._last_results_kind = [], 'search'
-            return 'semantic', []
+            return
 
         self._last_results = results
         self._last_results_kind = "search"
-        filtered = self._display_query_results()
-        return 'semantic', filtered
+        self._display_query_results()
 
 
 class DocumentQueryWindow(QMainWindow, DocumentQueryVisuals):
@@ -1187,7 +1109,6 @@ class DocumentQueryWindow(QMainWindow, DocumentQueryVisuals):
             self.statusBar().showMessage('Stopping analysis safely before closing…')
             event.ignore()
             return
-        self.performance.shutdown()
         super().closeEvent(event)
 
 

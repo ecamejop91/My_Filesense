@@ -1,7 +1,0 @@
-schema_version,benchmark_id,query_id,query,split,document_id,relevance
-1,synthetic-smoke-v1,q-payment,When must I pay for the office chairs?,test,finance/invoice.pdf,3
-1,synthetic-smoke-v1,q-payment,When must I pay for the office chairs?,test,travel/hotel.pdf,0
-1,synthetic-smoke-v1,q-payment,When must I pay for the office chairs?,test,study/graphs.pdf,0
-1,synthetic-smoke-v1,q-no-answer,Recipe for chocolate cake,test,finance/invoice.pdf,0
-1,synthetic-smoke-v1,q-no-answer,Recipe for chocolate cake,test,travel/hotel.pdf,0
-1,synthetic-smoke-v1,q-no-answer,Recipe for chocolate cake,test,study/graphs.pdf,0

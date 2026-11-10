@@ -1,4 +1,4 @@
-"""Indra OCR, 150 DPI, 200-token chunks, cross-file batches,
+"""Indra OCR, 150 DPI, 50-token chunks, cross-file batches,
 incremental index updates and tagging from stored chunk vectors."""
 from pathlib import Path
 import sys
@@ -121,8 +121,20 @@ class StoreFixture:
 
 
 class IncrementalIndexTests(StoreFixture, unittest.TestCase):
-    def test_default_chunk_size_is_200(self):
-        self.assertEqual(engine.CHUNK_SIZE, 200)
+    def test_default_reanalysis_replaces_old_chunks_without_overlap(self):
+        path = self.pdf('default.pdf', 'invoice')
+        text = 'abcdefghijklmnopqrstuvwxyz' * 4 + 'abcdefghijklmnopqrstu'
+        with patch.object(engine, 'extract_page_texts', return_value=('text', [(1, text)])):
+            old = engine.update_vector_store([path], self.store, chunk_size=200)
+            current = engine.update_vector_store([path], self.store)
+        self.assertEqual(len(old['chunk_records']), 1)
+        chunks = current['chunk_records']
+        self.assertEqual([len(Tokenizer().encode(c['text'])) for c in chunks], [50, 50, 25])
+        self.assertEqual(''.join(c['text'] for c in chunks), text)
+        docs, stored_chunks, vectors = database.load_index(self.store)
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(stored_chunks, chunks)
+        self.assertEqual(len(vectors), 3)
 
     def test_chunks_from_many_files_share_embedding_batches(self):
         paths = [self.pdf(f'f{i}.pdf', f'invoice number {i}') for i in range(5)]

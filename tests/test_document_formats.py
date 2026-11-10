@@ -17,7 +17,6 @@ import document_formats as formats
 import document_search_engine as engine
 import document_tag_store as tags
 import model_runtime
-from evaluation.corpus import load_corpus
 
 
 class Tokenizer:
@@ -145,7 +144,6 @@ class DocumentFormatTests(unittest.TestCase):
             hits = engine.search_index('invoice', loaded['model'], loaded['chunk_records'],
                                        loaded['chunk_vectors'], loaded['docs_by_id'], top_k=len(loaded['chunk_records']))
             self.assertEqual({h['path'] for h in hits}, {p.as_posix() for p in self.paths})
-            self.assertEqual(len(load_corpus(store / database.DATABASE_NAME, self.root, self.root).documents), 5)
             self.assertEqual(len(tags.load_tag_rows(store / database.DATABASE_NAME)), 5)
             with patch.object(engine, 'extract_document_chunks', side_effect=AssertionError('Unchanged file re-extracted')):
                 again = engine.update_vector_store(self.paths, store)

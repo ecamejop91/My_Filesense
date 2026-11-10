@@ -1,9 +1,8 @@
-ipykernel
-matplotlib
 numpy<2; sys_platform == "darwin" and platform_machine == "x86_64"
 numpy; sys_platform != "darwin" or platform_machine != "x86_64"
 PyMuPDF
-PyQt6>=6.7,<6.11
+# Qt 6.9 supports placing Settings in the native title-bar area.
+PyQt6>=6.9,<6.11
 # Intel Mac's last PyTorch wheels need the compatible embedding stack and NumPy 1.
 sentence-transformers>=3.4,<4; sys_platform == "darwin" and platform_machine == "x86_64"
 torch==2.2.2; sys_platform == "darwin" and platform_machine == "x86_64"

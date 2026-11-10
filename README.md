@@ -26,12 +26,15 @@ avoiding a schema migration. Unchanged Office/RTF documents reuse saved results.
 ## Features
 
 - Extracts text from local PDF files with PyMuPDF, with local Indra CPU OCR for scans on Windows and macOS.
-- Splits extracted text into ~200-token chunks.
+- Splits extracted text into chunks of up to 50 tokens (`cl100k_base`), with no overlap.
 - Embeds chunks with `sentence-transformers`.
 - Searches indexed chunks by semantic similarity.
 - Assigns simple semantic tags such as Finance, Legal, Travel, Work, and Health.
 - Provides a desktop GUI for adding PDFs, indexing them, previewing text, and searching.
 - Persists document metadata, text chunks, embeddings, and tags in a local SQLite database.
+
+Search queries are embedded as complete text. Previously indexed files adopt the
+new chunk size when analyzed again.
 
 ## New features
 
@@ -41,7 +44,6 @@ avoiding a schema migration. Unchanged Office/RTF documents reuse saved results.
 - Rename operations update the actual file, SQLite/vector index, saved tags, and visible file list together.
 - Windows and macOS launch support, including a Windows OCR compatibility path and PowerShell launcher.
 - Expanded application window with a collapsible empty file queue and improved indexing/status feedback.
-- **Advanced → Performance** opens optional search history and background retrieval evaluation, including a sample test and a saved-answer-key workflow for your collection.
 
 ## Setup
 
@@ -102,14 +104,11 @@ Start the desktop app:
 python document_query_visuals.py
 ```
 
+The title bar contains **Settings**, with **Clear Database**. Progress and status
+messages appear in the bottom status bar.
+
 Keep the `assets/` folder with the application when copying it. It contains
 the FileSense artwork and the Windows icon used by the window and taskbar.
-
-Optional vector visualization:
-
-```powershell
-python visualize_vectors.py
-```
 
 ## Search and tag filters
 
@@ -134,7 +133,7 @@ them again. The tag row scrolls horizontally to keep category names readable.
 For semantic queries, FileSense applies the tag filter before taking the top five
 chunk hits. Changing tags reuses the full ranking from the last submitted query,
 so a matching document can appear even when it was outside the previous top five.
-Filter changes do not re-embed the query or add a search-history entry. An exact
+Filter changes do not re-embed the query. An exact
 tag-name query remains the submitted query when filters change. Before any query
 has been submitted, selecting tags browses documents in those categories.
 
@@ -156,75 +155,12 @@ the source is missing, or the passage cannot be located unambiguously, the resul
 shows **Page unavailable** instead of guessing a number. Other document formats
 retain their current passage labels.
 
-## Performance in the app
-
-Open **Advanced → Performance**. The **Recent searches** tab has an optional
-**Track search performance** toggle, initially off. When enabled, it keeps the
-latest 100 searches in memory for the current FileSense session: query text,
-elapsed time, and the actual displayed semantic or tag results after filtering.
-Repeated PDF chunk hits remain in their displayed order. Similarity and tag scores
-are recorded as search output; they do not establish correctness, precision, or
-recall. The toggle preference is saved in `settings/performance.ini` inside the private FileSense data folder;
-history itself stays in memory and is not written to SQLite. **Export Excel…**
-opens a Save dialog for one `.xlsx` workbook with **Summary**, **Searches**, and
-**Results** sheets. Results include their query text and file paths, but no
-document snippets. **Clear history** removes the session records; turning tracking
-off pauses recording without clearing them. Existing export files are never
-overwritten, so choose a new filename for each export.
-
-In the **Evaluation** tab, choose **Sample test · ready to run** and click
-**Run sample evaluation** to exercise the workflow with three invented PDFs and
-four authored queries. Or choose **My collection · saved answer key**, select a
-JSON/CSV relevance benchmark and its document root, then click
-**Evaluate my collection**. Each query needs explicit relevance grades for every
-indexed PDF; FileSense does not generate these labels from similarity scores.
-The default evaluates the top five unique PDFs with FileSense and TF-IDF. Inspect
-the summary, per-query metrics, and ranked PDFs, then use **Export Excel…** to
-save one `.xlsx` workbook with **Summary**, **Aggregate**, **Per query**,
-**Rankings**, and **Metadata** sheets. Numeric values remain numbers for sorting
-and calculations in Excel.
-
-Evaluation runs in a separate process using the application's local model/tokenizer
-caches, with downloads disabled. It can use extra CPU and model memory while you
-continue working. **Cancel** stops a run; closing the Performance panel leaves it
-running, and quitting FileSense cancels it. The sample builds a new FileSense
-index, so even **TF-IDF only** needs the cached FileSense model and tokenizer.
-TF-IDF on your existing collection's index does not need the embedding model.
-The interface uses PyQt6 and the evaluation dependency scikit-learn. Excel export
-adds `openpyxl>=3.1,<4`; update the evaluation requirements in the same Python
-environment as FileSense, including when upgrading an existing installation:
-
-```sh
-python -m pip install -r evaluation/requirements.txt
-```
-
-Each run stays under `evaluations/app-{demo|benchmark}-TIMESTAMP-ID/` inside the private FileSense data folder.
-**Do not share the whole run directory:** it contains a private SQLite snapshot
-with document text and embeddings, plus a copied answer key. These local paths
-are ignored by Git. **Export Excel…** saves the evaluation tables and metadata
-in one workbook without the private index or answer-key snapshot. The underlying
-`results.json`, `per_query.csv`, `aggregate.csv`, and `rankings.csv` remain in the
-run's `report/` folder, accessible through **Open report folder**. Evaluation
-reports omit raw query and document text but still contain query IDs and document
-names; review them before sharing. Search-history workbooks include query text
-and paths and need their own privacy review.
-
-The three-document sample is intentionally easy. With top five results, returning
-all three documents reaches the recall ceiling for queries with relevant answers;
-equal quality metrics between the systems can be valid. The model and evaluation baseline
-are unchanged. Use a representative labeled benchmark to investigate differences,
-and keep the baseline fair instead of adjusting it to force a winner. Synthetic
-sample results cannot support Chapter 5 claims about real retrieval quality.
-
-See [the evaluation guide](evaluation/README.md) for labeling, metric definitions,
-privacy details, and the unchanged `python -m evaluation` command-line workflow.
-
 ## Privacy and separate computer accounts
 
 FileSense uses the signed-in Windows or macOS account as its identity. It does
 not require another username or password. Separate ordinary computer accounts
-have separate libraries, tags, preferences, and evaluation runs; a new account
-starts with an empty library. Clearing a library affects only that account.
+have separate libraries and category definitions; a new account starts with an
+empty library. Clearing a library affects only that account.
 
 Default data roots are resolved from the operating system:
 
@@ -234,15 +170,14 @@ Default data roots are resolved from the operating system:
 | macOS | `~/Library/Application Support/FileSense/` |
 
 Some Windows Python distributions redirect application data into a package-specific
-folder in the same user's profile. Hover over the main window's library indicator
+folder in the same user's profile. Hover over the bottom status bar
 to see the effective location. An environment variable or launch working directory
 does not select another account's data root.
 
 The folder contains `library/` (SQLite text, embeddings, paths, tags, and processing
-state), `settings/`, `evaluations/` (reports, answer keys and index snapshots),
-`cache/`, `tmp/`, and `logs/`. Recent searches and Word page maps remain in memory
-unless explicitly exported. Python temporary files and model/tokenizer caches
-use the private location during desktop launches. Distributed public model
+state), `cache/`, `tmp/`, and `logs/`. Word page maps remain in memory.
+Python temporary files and model/tokenizer caches use the private location
+during desktop launches. Distributed public model
 weights can still be read from `models/`; first-use OCR downloads use the private
 cache if a bundled model is absent.
 
@@ -254,43 +189,24 @@ in private state, and stops with an error if protection cannot be established.
 It never falls back to storing private data beside the program.
 
 A portable copy can run from a USB drive, but its private library stays with the
-account on that computer. Copying the program does not carry the library or
-another person's history. Installed and portable copies under the same account
-use that account's library.
-
-### Importing an existing library
-
-Choose **Advanced → Import Existing Library…**, select the old
-`vector_store_notebook/file_tags.sqlite3`, and explicitly confirm the copy into
-your current account. The destination must be empty, including custom category
-definitions. The import validates the database and vectors, preserves text,
-embeddings, tags and processing state, and copies a consistent SQLite snapshot
-including committed WAL changes. It never overwrites an existing private library.
-An incompatible or damaged import leaves the current library intact.
-
-Only import libraries you are authorized to use. Existing libraries are never
-assigned to an account automatically. The source database, its backups, old
-reports, and source documents remain unchanged. Old shared copies retain their
-previous access permissions; after verifying an import, their owner should
-separately decide whether to secure, archive, or remove them.
+account on that computer. Copying the program does not carry the library.
+Installed and portable copies under the same account use that account's library.
 
 ### Boundaries
 
 This is separation between ordinary computer accounts, not protection against an
 administrator, malware running as the same user, or someone using an unlocked
-session. Shared source documents remain shared. Exports and command-line output
-paths are explicitly chosen by the user and follow their destination's access
-permissions. Keep shared installed application files in an administrator-controlled
-location; for a portable copy, use a folder other accounts cannot modify. FileSense
+session. Shared source documents remain shared. Keep shared installed application
+files in an administrator-controlled location; for a portable copy, use a folder
+other accounts cannot modify. FileSense
 does not change permissions on the program folder or on original documents.
 
 ## Local Data
 
-Use **Advanced → Clear Database** to start a fresh analysis. After confirmation,
+Use **Settings → Clear Database** to start a fresh analysis. After confirmation,
 this clears indexed documents, extracted text, embeddings, and saved tag assignments.
 Original PDFs, custom category definitions, and queued files are kept. Click
-**Analyze Files** to index the queued PDFs again. Existing evaluation reports and
-snapshots are separate and are retained.
+**Analyze Files** to index the queued PDFs again.
 
 The app uses `library/file_tags.sqlite3` inside the current computer account's
 private FileSense data folder (see **Privacy and separate computer accounts** above).
@@ -342,7 +258,8 @@ your PDFs. PDFs themselves remain on disk and are not copied into the database.
 Run the storage and integration tests using your virtual environment:
 
 ```sh
-.venv/bin/python -m unittest discover -s tests -v
+python -m pip install -r requirements-test.txt
+python -m unittest discover -s tests -v
 ```
 
 This project intentionally ignores local PDFs and generated vector-store artifacts:
@@ -395,8 +312,8 @@ can be retried after fixing the problem. Existing database records are preserved
 
 This is deliberately a document-level fallback: if a PDF already produces any
 chunks, scanned pages mixed into that PDF are not OCR-processed. Recognition of
-handwriting, formulas, and complex reading order still needs evaluation on your
-own examples. Original PDFs are unchanged; recognized text is stored in SQLite,
+handwriting, formulas, and complex reading order should be checked on your own
+examples. Original PDFs are unchanged; recognized text is stored in SQLite,
 not written back as a selectable PDF text layer.
 
 Run the storage and OCR integration tests with:

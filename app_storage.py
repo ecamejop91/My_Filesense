@@ -45,20 +45,12 @@ class StoragePaths:
         return self.root / 'library'
 
     @property
-    def settings(self):
-        return self.root / 'settings'
-
-    @property
     def cache(self):
         return self.root / 'cache'
 
     @property
     def temporary(self):
         return self.root / 'tmp'
-
-    @property
-    def evaluations(self):
-        return self.root / 'evaluations'
 
     @property
     def logs(self):
@@ -150,7 +142,7 @@ def private_directory(path):
 
 def prepare_storage(paths=PATHS):
     private_directory(paths.root)
-    for folder in (paths.library, paths.settings, paths.temporary, paths.evaluations, paths.logs, paths.cache):
+    for folder in (paths.library, paths.temporary, paths.logs, paths.cache):
         private_directory(folder)
         # Repair older explicit file permissions as well as directory inheritance.
         # Public model caches can legitimately contain Hugging Face symlinks.
@@ -169,7 +161,7 @@ def configure_runtime(paths=PATHS):
     if sys.platform != 'win32':
         os.umask(0o077)
     for variable, name in (('HF_HOME', 'huggingface'), ('TIKTOKEN_CACHE_DIR', 'tiktoken'),
-                           ('MPLCONFIGDIR', 'matplotlib'), ('TORCH_HOME', 'torch'),
+                           ('TORCH_HOME', 'torch'),
                            ('HF_HUB_CACHE', 'huggingface/hub'),
                            ('HUGGINGFACE_HUB_CACHE', 'huggingface/hub'),
                            ('SENTENCE_TRANSFORMERS_HOME', 'sentence-transformers')):

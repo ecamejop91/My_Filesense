@@ -1,5 +1,5 @@
 """Tag-filter behavior against a tiny ranked corpus, without model downloads."""
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 import os
 from pathlib import Path
 import tempfile
@@ -16,8 +16,9 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 import document_query_visuals as gui
+import document_database as database
 import document_search_engine as engine
-from evaluation.performance import PerformanceController
+import document_tag_store as tags
 
 
 class TagFilterGUIIntegrationTests(unittest.TestCase):
@@ -50,14 +51,6 @@ class TagFilterGUIIntegrationTests(unittest.TestCase):
         self.tag_search = self.stack.enter_context(patch.object(
             gui, 'exact_tag_matches', side_effect=self.tag_matches))
         self.search = self.stack.enter_context(patch.object(gui, 'search_index', wraps=engine.search_index))
-
-        def isolated_controller(parent, **kwargs):
-            return PerformanceController(parent, source_base=self.root,
-                                         database=self.root / 'synthetic.sqlite3',
-                                         state_dir=self.root / 'state', run_dir=self.root / 'runs')
-
-        self.stack.enter_context(patch('evaluation.performance.PerformanceController',
-                                      side_effect=isolated_controller))
 
     def close_windows(self):
         for window in self.windows:
@@ -93,6 +86,22 @@ class TagFilterGUIIntegrationTests(unittest.TestCase):
     def displayed_names(self, window):
         text = window.results_view.toPlainText()
         return [name for name in self.names if name in text]
+
+    def indexed_rename_fixture(self):
+        window = self.window()
+        path = self.root / 'letter.docx'
+        path.write_bytes(b'rename fixture')
+        window.vector_store_dir = self.root / 'store'
+        db = window.vector_store_dir / database.DATABASE_NAME
+        docs = [dict(doc_id='doc', pdf_path=str(path), method='text', char_count=14)]
+        chunks = [dict(doc_id='doc', pdf_path=str(path), page=1, chunk_id=0, text='rename fixture')]
+        vectors = np.array([[1., 0.]], dtype=np.float32)
+        database.save_index(docs, chunks, vectors, window.vector_store_dir, engine.MODEL_NAME)
+        with closing(tags.connect_tag_db(db)) as connection:
+            tags.save_file_tags(path, [{'tag': 'Finance', 'score': .8}], 14, connection)
+        window.index_data.update(doc_records=docs, chunk_records=chunks, chunk_vectors=vectors,
+                                 docs_by_id={'doc': docs[0]})
+        return window, path, db
 
     def test_default_unchecked_search_includes_untagged_and_keeps_five_results(self):
         window = self.window()
@@ -163,75 +172,91 @@ class TagFilterGUIIntegrationTests(unittest.TestCase):
             self.assertIn(location + ' · Tags:', window._format_search_results_html([result]))
 
     def test_rename_preserves_office_extension(self):
-        window = self.window()
-        window.index_data = None
-        path = self.root / 'letter.docx'
-        path.write_bytes(b'rename fixture')
+        window, path, db = self.indexed_rename_fixture()
+        with patch.object(gui.QInputDialog, 'getText', return_value=('renamed', True)), \
+                patch.object(gui.QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes):
+            window._rename_file(path)
+        destination = self.root / 'renamed.docx'
+        self.assertTrue(destination.is_file())
+        self.assertFalse(path.exists())
+        self.assertFalse((self.root / 'renamed.pdf').exists())
+        docs, chunks, vectors = database.load_index(window.vector_store_dir)
+        self.assertEqual(docs[0]['pdf_path'], destination.as_posix())
+        self.assertEqual(chunks[0]['pdf_path'], destination.as_posix())
+        self.assertEqual(window.index_data['doc_records'][0]['pdf_path'], destination.as_posix())
+        np.testing.assert_array_equal(vectors, [[1., 0.]])
+        row = tags.load_tag_rows(db)[0]
+        self.assertEqual((row['file_path'], row['file_name'], row['tag_1']),
+                         (str(destination), destination.name, 'Finance'))
+        window._show_warning.assert_not_called()
+
+    def test_rename_database_failure_restores_file_and_all_database_paths(self):
+        window, path, db = self.indexed_rename_fixture()
+        with closing(database.connect_database(db)) as connection, connection:
+            connection.execute("CREATE TRIGGER prevent_tag_rename BEFORE UPDATE ON file_tags "
+                               "BEGIN SELECT RAISE(ABORT, 'tag rename failed'); END")
+        with patch.object(gui.QInputDialog, 'getText', return_value=('renamed', True)), \
+                patch.object(gui.QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes):
+            window._rename_file(path)
+        self.assertTrue(path.is_file())
+        self.assertFalse((self.root / 'renamed.docx').exists())
+        docs, chunks, _ = database.load_index(window.vector_store_dir)
+        self.assertEqual(docs[0]['pdf_path'], str(path))
+        self.assertEqual(chunks[0]['pdf_path'], str(path))
+        self.assertEqual(tags.load_tag_rows(db)[0]['file_path'], str(path))
+        self.assertIn('tag rename failed', window._show_warning.call_args.args[0])
+
+    def test_rename_display_failure_keeps_committed_file_and_database_paths(self):
+        window, path, db = self.indexed_rename_fixture()
         with patch.object(gui.QInputDialog, 'getText', return_value=('renamed', True)), \
                 patch.object(gui.QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
-                patch.object(engine, 'rename_document_in_vector_store', return_value=True), \
-                patch('document_tag_store.rename_file_tags'):
+                patch.object(window, '_format_categories_html', side_effect=OSError('display failed')):
             window._rename_file(path)
-        self.assertTrue((self.root / 'renamed.docx').is_file())
-        self.assertFalse((self.root / 'renamed.pdf').exists())
+        destination = self.root / 'renamed.docx'
+        self.assertTrue(destination.is_file())
+        self.assertFalse(path.exists())
+        docs, chunks, _ = database.load_index(window.vector_store_dir)
+        self.assertEqual(docs[0]['pdf_path'], destination.as_posix())
+        self.assertEqual(chunks[0]['pdf_path'], destination.as_posix())
+        self.assertEqual(tags.load_tag_rows(db)[0]['file_path'], str(destination))
+        self.assertIsNone(window.index_data)
+        self.assertIn('display could not refresh', window._show_warning.call_args.args[0])
+
+    def test_rename_rejects_directory_separators_with_a_warning(self):
+        window, path, _ = self.indexed_rename_fixture()
+        for name in ('nested/renamed.docx', 'nested\\renamed.docx'):
+            with self.subTest(name=name), \
+                    patch.object(gui.QInputDialog, 'getText', return_value=(name, True)), \
+                    patch.object(gui.QMessageBox, 'question') as confirm:
+                window._show_warning.reset_mock()
+                window._rename_file(path)
+                confirm.assert_not_called()
+                window._show_warning.assert_called_once()
+                self.assertTrue(path.is_file())
 
     def test_clear_database_cancellation_preserves_loaded_state(self):
         window = self.window()
         original = window.index_data
         with patch.object(gui.QMessageBox, 'question', return_value=QMessageBox.StandardButton.No), \
                 patch('document_database.clear_database') as clear:
-            window.clear_database()
+            window.settings_button.menu().actions()[0].trigger()
         clear.assert_not_called()
         self.assertIs(window.index_data, original)
 
-    def test_import_requires_explicit_confirmation_and_preserves_state_on_cancel(self):
-        window = self.window()
-        original = window.index_data
-        with patch.object(gui.QFileDialog, 'getOpenFileName', return_value=(str(self.root / 'old.sqlite3'), '')), \
-                patch.object(gui.QMessageBox, 'question', return_value=QMessageBox.StandardButton.No), \
-                patch('library_import.import_library') as copy:
-            window.import_existing_library()
-        copy.assert_not_called()
-        self.assertIs(window.index_data, original)
 
-    def test_import_refreshes_private_library_and_tag_filters_after_success(self):
-        window = self.window()
-        window.vector_store_dir = self.root / 'private-library'
-        source = self.root / 'old.sqlite3'
-        with patch.object(gui.QFileDialog, 'getOpenFileName', return_value=(str(source), '')), \
-                patch.object(gui.QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
-                patch('library_import.import_library', return_value=dict(documents=3, chunks=4)) as copy:
-            window.import_existing_library()
-        copy.assert_called_once_with(str(source), window.vector_store_dir / 'file_tags.sqlite3')
-        self.assertIsNone(window.index_data)
-        self.assertIsNone(window._last_query)
-        self.assertEqual(set(window.tag_filters), {'Finance', 'Travel'})
-        self.assertIn('Imported 3 documents', window.statusBar().currentMessage())
-
-    def test_failed_import_keeps_existing_library_view(self):
-        window = self.window()
-        original = window.index_data
-        with patch.object(gui.QFileDialog, 'getOpenFileName', return_value=(str(self.root / 'old.sqlite3'), '')), \
-                patch.object(gui.QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
-                patch('library_import.import_library', side_effect=ValueError('already contains data')):
-            window.import_existing_library()
-        self.assertIs(window.index_data, original)
-        window._show_warning.assert_called_once()
 
     def test_clear_database_resets_filters_and_cached_results_keeps_queue(self):
         window = self.window()
         self.submit(window)
         window.tag_filters['Finance'].setChecked(True)
         window.file_list.addItem('queued.pdf')
-        window.tag_data = {'tagged': ['old']}
-        actions = window.advanced_button.menu().actions()
+        actions = window.settings_button.menu().actions()
         action = next(action for action in actions if action.text() == 'Clear Database')
         with patch.object(gui.QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
                 patch('document_database.clear_database') as clear:
             action.trigger()
         clear.assert_called_once_with(window.vector_store_dir)
         self.assertIsNone(window.index_data)
-        self.assertIsNone(window.tag_data)
         self.assertIsNone(window._last_query)
         self.assertIsNone(window._last_results)
         self.assertFalse(any(check.isChecked() for check in window.tag_filters.values()))
@@ -250,12 +275,9 @@ class TagFilterGUIIntegrationTests(unittest.TestCase):
 
     def test_filter_before_top_five_and_or_semantics_without_model_reruns(self):
         window = self.window()
-        window.performance.set_tracking(True)
         window.tag_filters['Finance'].setChecked(True)
         self.submit(window)
         self.assertEqual(self.displayed_names(window), self.names[5:])
-        self.assertEqual(window.performance.history.records[0]['result_count'], 3)
-        self.assertEqual(window.performance.history.records[0]['results'][0]['document'], 'finance-sixth.pdf')
         window.query_input.setText('a draft that has not been submitted')
         window.tag_filters['Travel'].setChecked(True)
         # ANY selection includes the union, but does not include the untagged
@@ -271,11 +293,9 @@ class TagFilterGUIIntegrationTests(unittest.TestCase):
         self.assertEqual(window.tag_filter_scope.text(), 'All documents')
         self.search.assert_called_once()
         self.model.encode.assert_called_once()
-        self.assertEqual(len(window.performance.history.records), 1)
 
     def test_exact_tag_query_keeps_its_intent_when_filters_and_input_change(self):
         window = self.window()
-        window.performance.set_tracking(True)
         self.submit(window, 'Finance')
         self.assertEqual(self.displayed_names(window), self.names[5:])
         window.query_input.setText('Travel')
@@ -288,7 +308,6 @@ class TagFilterGUIIntegrationTests(unittest.TestCase):
         self.tag_search.assert_called_once_with('Finance')
         self.search.assert_not_called()
         self.model.encode.assert_not_called()
-        self.assertEqual(len(window.performance.history.records), 1)
 
     def test_filter_browsing_before_query_does_not_become_a_submitted_query(self):
         window = self.window()
@@ -303,7 +322,6 @@ class TagFilterGUIIntegrationTests(unittest.TestCase):
         self.assertIsNone(window._last_query)
         self.assertIsNone(window._last_results)
         self.search.assert_not_called()
-        self.assertEqual(window.performance.history.records, [])
 
     def test_empty_new_tag_query_cannot_restore_previous_semantic_results(self):
         window = self.window(tags=('Finance', 'Travel', 'Empty'))

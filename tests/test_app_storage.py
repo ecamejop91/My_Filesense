@@ -33,7 +33,7 @@ class PrivateStorageTests(unittest.TestCase):
         with patch.dict(os.environ, HF_HOME=str(self.root / 'shared-cache')):
             storage.configure_runtime(self.paths)
             for name in ('HF_HOME', 'HF_HUB_CACHE', 'HUGGINGFACE_HUB_CACHE', 'SENTENCE_TRANSFORMERS_HOME',
-                         'XDG_CACHE_HOME', 'TIKTOKEN_CACHE_DIR', 'MPLCONFIGDIR', 'TORCH_HOME', 'TEMP', 'TMP', 'TMPDIR'):
+                         'XDG_CACHE_HOME', 'TIKTOKEN_CACHE_DIR', 'TORCH_HOME', 'TEMP', 'TMP', 'TMPDIR'):
                 self.assertTrue(Path(os.environ[name]).is_relative_to(self.paths.root))
             with tempfile.NamedTemporaryFile() as handle:
                 self.assertTrue(Path(handle.name).is_relative_to(self.paths.temporary))
@@ -90,12 +90,10 @@ class PrivateStorageTests(unittest.TestCase):
         secure.assert_not_called()
         protect.assert_not_called()
 
-    def test_different_account_roots_do_not_share_settings_or_library(self):
+    def test_different_account_roots_do_not_share_library(self):
         other = storage.StoragePaths(self.root / 'account-b' / 'FileSense')
         storage.prepare_storage(self.paths)
         storage.prepare_storage(other)
-        (self.paths.settings / 'performance.ini').write_text('tracking_enabled=true')
-        self.assertFalse((other.settings / 'performance.ini').exists())
         from document_database import clear_database, load_index, save_index
         import numpy as np
         a = dict(doc_id='doc_00000', pdf_path=str(self.root / 'a.pdf'), method='none', char_count=0)

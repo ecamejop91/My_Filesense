@@ -15,8 +15,8 @@ existing bundle. Existing bundles are verified rather than overwritten.
 Include the **whole `models/all-MiniLM-L6-v2/` folder** when distributing FileSense
 as a folder or archive. The runtime discovers it relative to the program files,
 loads it with `local_files_only=True`, and shares it across indexing, tagging,
-search, and evaluation. SQLite continues recording the original logical model
-name so moving the program does not change its model identity.
+and search. SQLite continues recording the original logical model name so moving
+the program does not change its model identity.
 
 The weights are excluded from Git because the model is about 87 MiB. A plain Git
 clone needs the preparation command above or the separately distributed model

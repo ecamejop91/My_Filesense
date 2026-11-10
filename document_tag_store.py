@@ -14,25 +14,6 @@ from document_formats import is_supported
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-TAGS = [
-    "Travel",
-    "Finance",
-    "Legal",
-    "Government",
-    "Health",
-    "Education",
-    "Work",
-    "Shopping",
-    "Bills",
-    "Insurance",
-    "Personal",
-    "Property",
-    "Events",
-    "Technical",
-    "Marketing",
-    "Professional",
-]
-
 TAG_PROTOTYPES = {
     "Travel": "airline ticket, boarding pass, hotel reservation, itinerary, rental car, trip confirmation",
     "Finance": "bank statement, transaction, invoice, payment, tax form, receipt, account balance",
@@ -131,19 +112,6 @@ class DocumentTagger:
             scores = self._tag_vectors @ (mean / norm)
             results.append([dict(tag=self._tags[i], score=float(scores[i])) for i in np.argsort(-scores)[:top_k]])
         return results
-
-    def top_tags(self, document_text: str, top_k: int = 3) -> list[dict[str, float | str]]:
-        cleaned = document_text.strip()
-        if not cleaned or top_k <= 0:
-            return []
-
-        doc_vector = self._model.encode([cleaned[:12000]], normalize_embeddings=True)[0]
-        similarities = self._tag_vectors @ doc_vector
-        top_indices = self._np.argsort(-similarities)[:top_k]
-        return [
-            {"tag": self._tags[index], "score": float(similarities[index])}
-            for index in top_indices
-        ]
 
 
 def extract_text(pdf_path: Path) -> str:
@@ -558,15 +526,6 @@ def delete_file_tags(file_path: Path, db_path: Path = DEFAULT_DB_PATH) -> None:
     connection = connect_tag_db(db_path)
     try:
         connection.execute("DELETE FROM file_tags WHERE file_path = ?", (str(Path(file_path).expanduser().resolve()),))
-        connection.commit()
-    finally:
-        connection.close()
-
-
-def rename_file_tags(old_path: Path, new_path: Path, db_path: Path = DEFAULT_DB_PATH) -> None:
-    connection = connect_tag_db(db_path)
-    try:
-        connection.execute("UPDATE file_tags SET file_name = ?, file_path = ? WHERE file_path = ?", (Path(new_path).name, str(Path(new_path).expanduser().resolve()), str(Path(old_path).expanduser().resolve())))
         connection.commit()
     finally:
         connection.close()

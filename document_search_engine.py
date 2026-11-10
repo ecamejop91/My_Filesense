@@ -21,9 +21,9 @@ from model_runtime import get_model, canonical_model_name
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 ENCODING_NAME = "cl100k_base"
-# ~200 cl100k tokens stays inside all-MiniLM-L6-v2's 256 word-piece window
-# for ordinary prose while producing ~3x fewer chunks than the old 60.
-CHUNK_SIZE = 200
+# Fixed, non-overlapping chunks selected for top-three passage retrieval
+# in the HP Prime manual paraphrase study.
+CHUNK_SIZE = 50
 # Chunks from all files being analyzed are embedded together in batches this size.
 EMBED_BATCH_SIZE = 64
 TOP_K = 5
@@ -131,29 +131,6 @@ def extract_document_chunks(pdf_path: Path, tokenizer, chunk_size: int = CHUNK_S
         chunks = split_pages(page_texts)
         method = "ocr" if chunks else "none"
     return method, page_texts, chunks
-
-
-def find_entry(pdf_path: Path, doc_records):
-    candidate = pdf_path.expanduser().resolve()
-    for record in doc_records:
-        stored_path = Path(record["pdf_path"]).expanduser()
-        if not stored_path.is_absolute():
-            stored_path = PROJECT_DIR / stored_path
-        if stored_path.resolve() == candidate:
-            return record
-    return None
-
-
-def skip_entry(pdf_path: Path, doc_records) -> bool:
-    return find_entry(pdf_path, doc_records) is not None
-
-
-def load_jsonl_records(path: Path):
-    if not path.exists():
-        return []
-
-    with path.open("r", encoding="utf-8") as handle:
-        return [json.loads(line) for line in handle]
 
 
 def next_doc_index(doc_records) -> int:
@@ -552,20 +529,3 @@ def search_index(
         )
 
     return results
-
-
-def print_search_results(query: str, results) -> None:
-    print(f"Query: {query!r}")
-    print(f"Top {len(results)} matches:")
-    print()
-
-    for result in results:
-        print(f"Match #{result['rank']}")
-        print(f"Score: {result['score']:.4f}")
-        print(f"Document: {result['document']}")
-        print(f"Path: {result['path']}")
-        print(f"Page: {result['page']}")
-        print(f"Chunk ID: {result['chunk_id']}")
-        print("Best matching text:")
-        print(result["text"])
-        print()
